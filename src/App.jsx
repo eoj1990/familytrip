@@ -1,13 +1,19 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   MapPin, Mountain, Camera, ChevronDown, ExternalLink,
   CheckCircle2, Tent, Leaf, DollarSign, Link as LinkIcon
 } from "lucide-react";
 
+// ⬇️ Local image imports (make sure these files exist in src/images)
+import rushmore from "./images/rushmore.jpg";
+import badlands from "./images/badlands.jpg";
+import sylvan from "./images/sylvan.jpg";
+import wonders from "./images/wonders.jpg";
+
 /** 
  * Moody Family Black Hills — Single-Page App
- * Uses local images from /public/images for rock-solid rendering on StackBlitz + Vercel.
+ * Includes a local-only Travel Journal (notes + photos via localStorage).
  */
 
 const cx = (...c) => c.filter(Boolean).join(" ");
@@ -18,7 +24,7 @@ const fadeIn = {
   transition: { duration: 0.6, ease: "easeOut" },
 };
 
-// simple localStorage hook for packing checklist
+// simple localStorage hook for checklists
 function useLocalStorage(key, initial) {
   const [value, setValue] = useState(() => {
     try {
@@ -54,7 +60,7 @@ const COVER = {
   title: "Moody Family Black Hills Adventure",
   subtitle: "June 2026 • 10-Day RV Journey",
   quote: "The best memories are made on the road.",
-  image: "/images/rushmore.jpg", // put file at public/images/rushmore.jpg
+  image: rushmore,
 };
 
 const CAMPGROUNDS = [
@@ -132,7 +138,7 @@ const SECTIONS = [
     nav: "Badlands",
     icon: <Mountain className="h-5 w-5" />,
     title: "Into the Badlands (Days 1–3)",
-    image: "/images/badlands.jpg", // put file at public/images/badlands.jpg
+    image: badlands,
     paragraphs: [
       "The road stretches straight ahead, and the world starts to look different. The air gets drier, the hills taller, the sky bigger.",
       "Then it happens — we pull off at the overlook, the kids tumble out of the RV, and all of us just stop. The cliffs rise up in layers of gold and red, striped like something from another planet.",
@@ -154,7 +160,7 @@ const SECTIONS = [
     nav: "Hills",
     icon: <Tent className="h-5 w-5" />,
     title: "Into the Hills (Days 4–6)",
-    image: "/images/sylvan.jpg", // put file at public/images/sylvan.jpg
+    image: sylvan,
     paragraphs: [
       "We’ll roll into Custer State Park, where the granite spires close in and the water turns alpine-clear.",
       "Mornings at Sylvan Lake mean canoes, crisp air, and the echo of oars. Then we lace up for the climb — Black Elk Peak — the crown of the Hills.",
@@ -176,7 +182,7 @@ const SECTIONS = [
     nav: "Wonders",
     icon: <Camera className="h-5 w-5" />,
     title: "Wonders in Stone (Days 7–8)",
-    image: "/images/wonders.jpg", // put file at public/images/wonders.jpg
+    image: wonders,
     paragraphs: [
       "We’ll head underground for cave formations and stair climbs, then race above the trees on the mountain coaster.",
       "At Mount Rushmore (Day 7), we’ll walk the Presidential Trail and the museum, then continue to Crazy Horse. And at Reptile Gardens, the kids will meet living dinosaurs and gentle giants.",
@@ -198,6 +204,7 @@ const SECTIONS = [
   },
 ];
 
+// ===== Journal (local-only) =====
 function SectionHeader({ icon, title, id }) {
   return (
     <div id={id} className="flex items-center gap-3 mb-6">
@@ -209,6 +216,173 @@ function SectionHeader({ icon, title, id }) {
   );
 }
 
+function useLocalJson(key, initial) {
+  const [val, setVal] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(key)) ?? initial; }
+    catch { return initial; }
+  });
+  useEffect(() => localStorage.setItem(key, JSON.stringify(val)), [key, val]);
+  return [val, setVal];
+}
+
+function JournalEntryCard({ entry, onDelete }) {
+  return (
+    <div className="bg-white/5 rounded-xl p-4 ring-1 ring-white/10">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-amber-200/80">{new Date(entry.createdAt).toLocaleString()}</p>
+        <button onClick={() => onDelete(entry.id)} className="text-amber-300 hover:text-white text-sm">Delete</button>
+      </div>
+      {entry.text && <p className="text-amber-50/95 mt-2 whitespace-pre-wrap">{entry.text}</p>}
+      {entry.images?.length > 0 && (
+        <div className="grid grid-cols-3 gap-2 mt-3">
+          {entry.images.map((src, i) => (
+            <a key={i} href={src} target="_blank" rel="noreferrer">
+              <img src={src} alt="trip" className="w-full h-28 object-cover rounded-lg ring-1 ring-white/10" />
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Journal() {
+  const [entries, setEntries] = useLocalJson("moody-journal", []);
+  const [text, setText] = useState("");
+  const [files, setFiles] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  // File[] -> data URLs with simple downscale
+  const readFilesAsDataURLs = async (fileList) => {
+    const maxW = 1600;
+    const toDataURL = (file) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(1, maxW / img.width);
+          if (scale < 1) {
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.round(img.width * scale);
+            canvas.height = Math.round(img.height * scale);
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL("image/jpeg", 0.8));
+          } else {
+            resolve(e.target.result);
+          }
+        };
+        img.onerror = reject;
+        img.src = e.target.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const arr = Array.from(fileList || []);
+    const urls = [];
+    for (const f of arr) urls.push(await toDataURL(f));
+    return urls;
+  };
+
+  const addEntry = async () => {
+    if (!text && files.length === 0) return;
+    setBusy(true);
+    try {
+      const images = await readFilesAsDataURLs(files);
+      const entry = {
+        id: crypto.randomUUID(),
+        createdAt: Date.now(),
+        text,
+        images,
+      };
+      setEntries([entry, ...entries]);
+      setText("");
+      setFiles([]);
+      const input = document.getElementById("journalFiles");
+      if (input) input.value = "";
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteEntry = (id) => setEntries(entries.filter(e => e.id !== id));
+
+  // Export / Import
+  const exportJson = () => {
+    const blob = new Blob([JSON.stringify(entries, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement("a"), { href: url, download: "moody-journal.json" });
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  };
+  const importJson = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (Array.isArray(data)) setEntries(data);
+      } catch {}
+    };
+    reader.readAsText(file);
+  };
+
+  const approxSizeKB = Math.round((new Blob([JSON.stringify(entries)]).size) / 1024);
+
+  return (
+    <section id="journal" className="py-16 bg-[#0F0D0B]">
+      <div className="container mx-auto px-6">
+        <SectionHeader icon={<Camera className="h-5 w-5" />} title="Travel Journal (Private on this device)" />
+        <div className="grid lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-1 bg-white/5 rounded-xl p-5 ring-1 ring-white/10">
+            <label className="block text-amber-100 font-semibold mb-2">Add a note</label>
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              className="w-full h-32 rounded-lg bg-black/40 text-amber-50 p-3 outline-none ring-1 ring-white/10"
+              placeholder="What did you see / do / feel today?"
+            />
+            <label className="block text-amber-100 font-semibold mt-4 mb-2">Attach photos (optional)</label>
+            <input
+              id="journalFiles"
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(e) => setFiles(Array.from(e.target.files))}
+              className="block w-full text-amber-200"
+            />
+            <button
+              onClick={addEntry}
+              disabled={busy}
+              className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-500 disabled:opacity-60"
+            >
+              {busy ? "Saving…" : "Save entry"}
+            </button>
+            <div className="flex items-center gap-3 mt-5">
+              <button onClick={exportJson} className="text-amber-300 hover:text-white text-sm underline">Export</button>
+              <label className="text-amber-300 hover:text-white text-sm underline cursor-pointer">
+                Import
+                <input type="file" accept="application/json" className="hidden" onChange={(e) => e.target.files[0] && importJson(e.target.files[0])}/>
+              </label>
+              <span className="text-xs text-amber-200/70 ml-auto">~{approxSizeKB} KB used</span>
+            </div>
+            <p className="text-xs text-amber-200/70 mt-2">
+              Tip: localStorage has limits (~5–10 MB). Export regularly if you add lots of photos.
+            </p>
+          </div>
+
+          <div className="lg:col-span-2 space-y-4">
+            {entries.length === 0 ? (
+              <p className="text-amber-200/80">No entries yet — add your first note and photos!</p>
+            ) : (
+              entries.map((e) => <JournalEntryCard key={e.id} entry={e} onDelete={deleteEntry} />)
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ====== UI SECTIONS ======
 function Hero() {
   return (
     <section
@@ -243,6 +417,7 @@ function StickyTabs({ ids }) {
     { id: "wonders", label: "Wonders" },
     { id: "essentials", label: "Budget" },
     { id: "packing", label: "Packing" },
+    { id: "journal", label: "Journal" }, // ⬅️ new
   ];
   return (
     <div className="sticky top-0 z-40 backdrop-blur bg-[#0B0907]/70 border-b border-white/10">
@@ -412,7 +587,7 @@ function Footer() {
       <div className="container mx-auto px-6 py-10 grid md:grid-cols-2 gap-6">
         <div>
           <p className="font-semibold">Moody • Black Hills 10-Day RV</p>
-          <p className="opacity-80 mt-1">Itinerary • Photos • Links • Packing</p>
+          <p className="opacity-80 mt-1">Itinerary • Photos • Links • Packing • Journal</p>
         </div>
         <nav className="flex flex-wrap gap-4 items-center md:justify-end">
           <a className="hover:text-white" href="#letter">Letter</a>
@@ -421,6 +596,7 @@ function Footer() {
           <a className="hover:text-white" href="#wonders">Wonders</a>
           <a className="hover:text-white" href="#essentials">Budget</a>
           <a className="hover:text-white" href="#packing">Packing</a>
+          <a className="hover:text-white" href="#journal">Journal</a>
         </nav>
       </div>
     </footer>
@@ -428,7 +604,7 @@ function Footer() {
 }
 
 export default function App() {
-  const sectionOrder = ["letter", "badlands", "hills", "wonders", "essentials", "packing"];
+  const sectionOrder = ["letter", "badlands", "hills", "wonders", "essentials", "packing", "journal"];
   return (
     <div className="min-h-screen bg-[#0B0907] text-white selection:bg-amber-300/30">
       {/* HERO */}
@@ -450,6 +626,9 @@ export default function App() {
 
       {/* PACKING */}
       <Checklist />
+
+      {/* JOURNAL */}
+      <Journal />
 
       {/* FOOTER */}
       <Footer />
